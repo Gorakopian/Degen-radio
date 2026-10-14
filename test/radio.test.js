@@ -90,4 +90,28 @@ const ok = await call({ authorization: "secret123" }, [swap("z", -3, 50, now + 2
 assert.equal(ok.status, 200);
 assert.equal(ok.body.events, 1);
 assert.equal((await recentEvents(1))[0].id.startsWith("z:"), true);
+
+// Wallets added in Exit Alarm: forwarded to the alarm, never on the radio
+const W = "Whale1111111111111111111111111111111111111";
+const wswap = (sig, sol, tok) => ({ ...swap(sig, sol, tok, now + 300), feePayer: W,
+  accountData: [{ account: W, nativeBalanceChange: Math.round(sol * 1e9), tokenBalanceChanges: [] },
+    { account: "ata2", nativeBalanceChange: 0, tokenBalanceChanges: [{ userAccount: W, mint: MINT, rawTokenAmount: { tokenAmount: String(tok * 1e6), decimals: 6 } }] }] });
+assert.equal(txsToEvents([wswap("w0", 5, -10)]).length, 0, "unknown wallet ignored by default");
+const forwarded = [];
+globalThis.fetch = async (url, init) => {
+  if (String(url) === "https://alarm/api/hook") forwarded.push(...JSON.parse(init.body));
+  return { ok: true, json: async () => ({}), text: async () => "" };
+};
+await redis("SET", "alarm:inbox", JSON.stringify({ url: "https://alarm/api/hook", secret: "s" }));
+await redis("HSET", "alarm:wallets", W, "1");
+const w1 = await call({ authorization: "secret123" }, [wswap("w1", 5, -10)]);
+assert.equal(w1.body.events, 1);
+assert.deepEqual([forwarded.at(-1).t, forwarded.at(-1).custom, forwarded.at(-1).side], [W, true, "sell"]);
+assert.notEqual((await recentEvents(1))[0].t, W, "custom wallet stays off the radio");
+// A spam bot wallet gets dropped after the daily limit
+const { CUSTOM_DAILY_LIMIT } = await import("../api/hook.js");
+await redis("SET", `alarm:rate:${W}:${new Date().toISOString().slice(0, 10)}`, String(CUSTOM_DAILY_LIMIT));
+await call({ authorization: "secret123" }, [wswap("w2", 5, -10)]);
+assert.equal(forwarded.at(-1).dropped, true);
+assert.equal(await redis("HGET", "alarm:wallets", W), null);
 console.log("radio OK");
