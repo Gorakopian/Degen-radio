@@ -11,7 +11,7 @@ if (existsSync(envPath)) {
     if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
   }
 }
-const routes = { "/api/radio": () => import("../api/radio.js"), "/api/hook": () => import("../api/hook.js") };
+const routes = { "/api/radio": () => import("../api/radio.js"), "/api/hook": () => import("../api/hook.js"), "/api/voice": () => import("../api/voice.js") };
 const port = Number(process.env.PORT) || 3000;
 http.createServer(async (req, res) => {
   try {

@@ -114,4 +114,27 @@ await redis("SET", `alarm:rate:${W}:${new Date().toISOString().slice(0, 10)}`, S
 await call({ authorization: "secret123" }, [wswap("w2", 5, -10)]);
 assert.equal(forwarded.at(-1).dropped, true);
 assert.equal(await redis("HGET", "alarm:wallets", W), null);
+// AI voice: line → MP3 through OpenAI, cached, falls back when no key
+const { speakable } = await import("../lib/tts.js");
+assert.equal(speakable("Ansem aped $WIF at 45k, ngmi"), "Ansem aped WIF at 45K, N G M I");
+const { default: voice } = await import("../api/voice.js");
+const getVoice = (id) => new Promise((resolve) => {
+  const headers = {};
+  voice({ method: "GET", url: "/api/voice?id=" + id, headers: {} }, { statusCode: 200, setHeader(k, v) { headers[k] = v; }, end(x) { resolve({ status: this.statusCode, headers, body: x }); } });
+});
+assert.equal((await getVoice(1)).status, 404, "no key → no AI voice");
+process.env.OPENAI_API_KEY = "sk-test";
+let ttsBody;
+globalThis.fetch = async (url, init) => {
+  if (String(url).includes("audio/speech")) { ttsBody = JSON.parse(init.body); return { ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer }; }
+  return { ok: true, json: async () => ({}) };
+};
+const segId = (await (await import("../lib/show.js")).recentSegments(1))[0].id;
+const v = await getVoice(segId);
+assert.equal(v.status, 200);
+assert.equal(v.headers["content-type"], "audio/mpeg");
+assert.match(v.headers["cache-control"], /s-maxage/);
+assert.match(ttsBody.instructions, /radio DJ/);
+assert.equal((await snapshot({})).speech, "ai");
+delete process.env.OPENAI_API_KEY;
 console.log("radio OK");
