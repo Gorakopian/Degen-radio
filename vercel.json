@@ -12,6 +12,9 @@
     },
     "api/voice.js": {
       "maxDuration": 60
+    },
+    "api/lab.js": {
+      "maxDuration": 60
     }
   }
 }

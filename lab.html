@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Voice Test</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee&family=Instrument+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Same studio look as the radio: a list of numbered voices, tap to hear the same line in each. */
+:root {
+  --studio: #120c0e; --desk: #1d1417; --rule: #3a2a2f; --paper: #f3ece6; --mute: #b4a5a8;
+  --onair: #ff2e3f; --amber: #ffbf3c;
+  --font-display: "Bungee", "Arial Black", Impact, sans-serif;
+  --font-body: "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; background: var(--studio); color: var(--paper); }
+body { font: 15px/1.5 var(--font-body); padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+button { font: inherit; color: inherit; }
+.wrap { max-width: 720px; margin: 0 auto; padding: 28px 16px 64px; display: flex; flex-direction: column; gap: 18px; }
+h1 { margin: 0; font: 400 clamp(28px, 7vw, 44px)/1 var(--font-display); }
+h1 span { color: var(--onair); }
+.lead { margin: 0; color: var(--mute); }
+.line { margin: 0; background: var(--desk); border: 1px solid var(--rule); border-radius: 14px; padding: 14px; font-style: italic; }
+ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; counter-reset: v; }
+li { counter-increment: v; background: var(--desk); border: 1px solid var(--rule); border-radius: 14px; padding: 12px; display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: center; }
+li::before { content: counter(v); font: 400 18px var(--font-display); color: #120c0e; background: var(--amber); width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; }
+li.off { opacity: .45; }
+li.now { border-color: var(--onair); }
+.label { font-weight: 600; }
+.said { grid-column: 2 / -1; margin: 0; color: var(--mute); font-size: 13px; }
+.play { background: var(--onair); border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 700; cursor: pointer; min-width: 74px; }
+.play:disabled { background: var(--rule); cursor: default; }
+a { color: var(--amber); }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <h1>VOICE <span>TEST</span></h1>
+  <p class="lead">Same roast, different voices. Tap through them and tell Claude the number that sounds most like a real DJ. The first time each one plays it takes a few seconds to make.</p>
+  <p class="line" id="line">…</p>
+  <ol id="list"></ol>
+  <p class="lead"><a href="/">← Back to the radio</a></p>
+</main>
+<script>
+(async function () {
+  const list = document.getElementById("list");
+  const audio = new Audio();
+  let nowBtn = null;
+  const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
+  function reset() { if (nowBtn) { nowBtn.textContent = "▶ Play"; nowBtn.closest("li").classList.remove("now"); nowBtn = null; } }
+  audio.onended = reset;
+  let data;
+  try { data = await fetch("/api/lab").then((r) => r.json()); }
+  catch { list.append(el("p", "lead", "Couldn't load the voices. Try again in a minute.")); return; }
+  document.getElementById("line").textContent = "“" + data.line + "”";
+  for (const o of data.options) {
+    const li = el("li", o.available ? "" : "off");
+    const label = el("span", "label", o.label);
+    const btn = el("button", "play", o.available ? "▶ Play" : "Needs key");
+    btn.type = "button"; btn.disabled = !o.available;
+    const said = el("p", "said"); said.hidden = true;
+    btn.onclick = async () => {
+      if (nowBtn === btn) { audio.pause(); reset(); return; }
+      audio.pause(); reset();
+      nowBtn = btn; li.classList.add("now"); btn.textContent = "…";
+      audio.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA="; audio.play().catch(() => {});
+      try {
+        const r = await fetch("/api/lab?v=" + o.id);
+        if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || "failed"); }
+        const t = r.headers.get("x-transcript");
+        if (t) { said.textContent = "Said: “" + decodeURIComponent(t) + "”"; said.hidden = false; }
+        if (nowBtn !== btn) return;
+        audio.src = URL.createObjectURL(await r.blob());
+        await audio.play();
+        btn.textContent = "■ Stop";
+      } catch (e) {
+        reset(); btn.textContent = "Not available"; btn.disabled = true; li.classList.add("off");
+        said.textContent = String(e.message).slice(0, 120); said.hidden = false;
+      }
+    };
+    li.append(label, btn, said);
+    list.append(li);
+  }
+})();
+</script>
+</body>
+</html>
