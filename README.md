@@ -52,7 +52,7 @@ Stream mode shows only the big caption and the ON AIR light.
 | `index.html` | The radio: caption, listen button, voice picker, transcript, the wire, biggest apers, stream mode |
 | `api/radio.js` | What the page polls: new lines, latest trades, today's stats; keeps the show running |
 | `api/hook.js` | Receives the traders' transactions from Helius |
-| `lib/host.js` | The host's prompt, the AI call (Claude or OpenAI-compatible) and backup lines |
+| `lib/host.js` | The host's prompt, the AI call (Claude or OpenAI-compatible), backup lines, and which traders are stars (the first 20 in the list) |
 | `lib/show.js` | When to speak, today's stats |
 | `lib/feed.js` | Turns transactions into trades, coin names and market caps, sets up the Helius webhook, demo trades |
 | `lib/traders.js` | The 100 traders (same list as Degen League) |

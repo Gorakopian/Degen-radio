@@ -81,6 +81,9 @@ select { background: var(--studio); border: 1px solid var(--rule); border-radius
 .trade .side.buy { color: var(--buy); } .trade .side.sell { color: var(--sell); }
 .trade .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trade .what a { color: var(--mute); text-decoration: none; font-size: 12px; }
+.trade.star { background: linear-gradient(90deg, rgba(255,191,60,.10), transparent 70%); }
+.trade.star .what { color: var(--amber); font-weight: 700; }
+.tag.star { color: var(--amber); border: 1px solid #6b5520; }
 .trade .amt { font: 600 13px var(--font-mono); color: var(--amber); white-space: nowrap; }
 .board { display: flex; flex-direction: column; gap: 6px; }
 .board div { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
@@ -215,7 +218,7 @@ body.stream .booth { padding: 4vw; }
       const tags = el("div", "tags");
       for (const id of (seg.events || []).slice(0, 6)) {
         const t = tradesById[id]; if (!t) continue;
-        tags.append(el("span", "tag " + t.side, `${t.side === "buy" ? "▲" : "▼"} ${t.n} $${t.sym} ${t.sol} SOL`));
+        tags.append(el("span", "tag " + t.side + (t.star ? " star" : ""), `${t.side === "buy" ? "▲" : "▼"} ${t.star ? "★ " : ""}${t.n} $${t.sym} ${t.sol} SOL`));
       }
       if (tags.childElementCount) body.append(tags);
       row.append(body); box.append(row);
@@ -226,9 +229,9 @@ body.stream .booth { padding: 4vw; }
     const box = $("wire"); box.replaceChildren();
     if (!trades.length) { box.append(el("p", "empty", "Waiting for the first trade…")); return; }
     for (const t of trades.slice(0, 18)) {
-      const row = el("div", "trade");
+      const row = el("div", "trade" + (t.star ? " star" : ""));
       row.append(el("span", "side " + t.side, t.side === "buy" ? "BUY" : "SELL"));
-      const what = el("span", "what"); what.append(document.createTextNode(`${t.n} · $${t.sym} `));
+      const what = el("span", "what"); what.append(document.createTextNode(`${t.star ? "★ " : ""}${t.n} · $${t.sym} `));
       if (t.mcap) what.append(el("span", "tag", fmtMcap(t.mcap)));
       row.append(what, el("span", "amt", `${t.sol} SOL`));
       box.append(row);

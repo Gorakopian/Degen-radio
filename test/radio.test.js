@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import { txsToEvents, storeEvents, recentEvents } from "../lib/feed.js";
-import { describeEvent, buildPrompt, templateLine } from "../lib/host.js";
+import { describeEvent, buildPrompt, templateLine, pickEvents } from "../lib/host.js";
 import { tick, snapshot, dayStats } from "../lib/show.js";
 import { redis } from "../lib/redis.js";
 import { TRADERS } from "../lib/traders.js";
@@ -25,9 +25,17 @@ assert.equal(ev[1].side, "sell");
 
 // Host text
 const e = { ...ev[0], sym: "GOBLIN", mcap: 45000 };
-assert.equal(describeEvent(e), `${T.name} (@${T.x}) BOUGHT $GOBLIN for 12.5 SOL at 45k market cap`);
+assert.equal(describeEvent(e), `[STAR] ${T.name} (@${T.x}) BOUGHT $GOBLIN for 12.5 SOL at 45k market cap`);
+const nobody = { ...e, t: TRADERS[90].id, n: TRADERS[90].name, x: null };
+assert.ok(!describeEvent(nobody).startsWith("[STAR]"));
+// Stars are read out first, even when smaller
+const picked = pickEvents([...Array(12)].map((_, i) => ({ ...nobody, id: "n" + i, sol: 50 + i, ts: i })).concat([{ ...e, id: "s", sol: 1, ts: 5 }]), 3);
+assert.ok(picked.some((x) => x.id === "s"));
+assert.equal(picked.length, 3);
+assert.match(templateLine([{ ...e, sol: 12.5 }]), new RegExp(T.name));
 const p = buildPrompt([e], ["Old line"], "3 trades.");
 assert.match(p, /No slurs/);
+assert.match(p, /\[STAR\]/);
 assert.match(p, /BOUGHT \$GOBLIN/);
 assert.match(p, /Old line/);
 assert.ok(templateLine([e]).includes("GOBLIN"));
