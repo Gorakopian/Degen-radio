@@ -124,9 +124,14 @@ const getVoice = (id) => new Promise((resolve) => {
 });
 assert.equal((await getVoice(1)).status, 404, "no key → no AI voice");
 process.env.OPENAI_API_KEY = "sk-test";
-let ttsBody;
+let ttsBody, improvBody, improvOk = false;
 globalThis.fetch = async (url, init) => {
   if (String(url).includes("audio/speech")) { ttsBody = JSON.parse(init.body); return { ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer }; }
+  if (String(url).includes("chat/completions")) {
+    improvBody = JSON.parse(init.body);
+    if (!improvOk) return { ok: false, status: 404, text: async () => "model not found" };
+    return { ok: true, json: async () => ({ choices: [{ message: { audio: { data: Buffer.from("MP3").toString("base64"), transcript: "Yo yo yo, Frank just aped!" } } }] }) };
+  }
   return { ok: true, json: async () => ({}) };
 };
 const segId = (await (await import("../lib/show.js")).recentSegments(1))[0].id;
@@ -134,7 +139,15 @@ const v = await getVoice(segId);
 assert.equal(v.status, 200);
 assert.equal(v.headers["content-type"], "audio/mpeg");
 assert.match(v.headers["cache-control"], /s-maxage/);
-assert.match(ttsBody.instructions, /radio DJ/);
+assert.match(ttsBody.instructions, /radio DJ/, "improv failed → falls back to reading it out");
+improvOk = true;
+await redis("SET", "radio:segs:dummy", "1");
+const { improvise } = await import("../lib/tts.js");
+const imp = await improvise("Frank aped $WIF", { OPENAI_API_KEY: "sk-test" });
+assert.equal(imp.transcript, "Yo yo yo, Frank just aped!");
+assert.equal(imp.mp3.toString(), "MP3");
+assert.deepEqual(improvBody.modalities, ["text", "audio"]);
+assert.match(improvBody.messages[1].content, /Frank aped WIF/);
 assert.equal((await snapshot({})).speech, "ai");
 delete process.env.OPENAI_API_KEY;
 console.log("radio OK");

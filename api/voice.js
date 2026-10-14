@@ -1,7 +1,7 @@
 // GET /api/voice?id=<line id> → that host line as an MP3 in the AI voice.
 // Cached by Vercel's CDN, so each line is generated once no matter how many people listen.
 import { recentSegments } from "../lib/show.js";
-import { synthesize, ttsProvider, TTS_DAILY_MAX } from "../lib/tts.js";
+import { perform, ttsProvider, TTS_DAILY_MAX } from "../lib/tts.js";
 import { redis } from "../lib/redis.js";
 import { send, query } from "../lib/http.js";
 
@@ -18,8 +18,11 @@ export default async function handler(req, res) {
   if (n > TTS_DAILY_MAX) return send(res, 429, { error: "daily voice limit reached" });
 
   try {
-    const mp3 = await synthesize(seg.text);
+    const { mp3, transcript } = await perform(seg.text);
+    if (perform.lastError) await redis("SET", "radio:improvError", perform.lastError, "EX", 3600);
     res.statusCode = 200;
+    // what the DJ actually said (it improvises), so the captions match
+    if (transcript) res.setHeader("x-transcript", encodeURIComponent(transcript.slice(0, 1200)));
     res.setHeader("content-type", "audio/mpeg");
     res.setHeader("content-length", mp3.length);
     res.setHeader("cache-control", "public, max-age=86400, s-maxage=86400, immutable");

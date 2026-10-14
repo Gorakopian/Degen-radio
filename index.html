@@ -56,7 +56,7 @@ header { display: flex; flex-wrap: wrap; align-items: center; justify-content: s
 .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .go { background: var(--onair); color: #fff; border: 0; border-radius: 12px; padding: 14px 20px; font: 400 16px var(--font-display); letter-spacing: .04em; }
 .go.stop { background: transparent; border: 2px solid var(--onair); color: var(--onair); }
-.btn { background: transparent; border: 1px solid var(--rule); border-radius: 10px; padding: 10px 14px; font-weight: 600; font-size: 14px; color: var(--paper); text-decoration: none; display: inline-flex; align-items: center; }
+.btn { font-family: inherit; cursor: pointer; background: transparent; border: 1px solid var(--rule); border-radius: 10px; padding: 10px 14px; font-weight: 600; font-size: 14px; color: var(--paper); text-decoration: none; display: inline-flex; align-items: center; }
 .btn:hover { border-color: var(--mute); }
 select { background: var(--studio); border: 1px solid var(--rule); border-radius: 10px; padding: 9px 10px; font-size: 14px; max-width: 220px; }
 .note { color: var(--mute); font-size: 13px; margin: 0; }
@@ -116,6 +116,7 @@ body.stream .booth { padding: 4vw; }
     <div class="controls">
       <button class="go" id="listen" type="button">▶ LISTEN LIVE</button>
       <select id="voice" aria-label="Voice"></select>
+      <button class="btn" id="beat" type="button">🎵 Beat on</button>
       <a class="btn" id="share" target="_blank" rel="noopener">Share this line</a>
       <a class="btn" id="streamLink" href="?stream" target="_blank" rel="noopener">Stream mode</a>
     </div>
@@ -169,22 +170,85 @@ body.stream .booth { padding: 4vw; }
   if (tts) { fillVoices(); tts.onvoiceschanged = fillVoices; } else { $("voice").hidden = true; }
   $("voice").onchange = () => store.set("dr_voice", $("voice").value);
 
-  // ---------- speaking: AI voice (MP3 from the server) or the browser's own voice as fallback ----------
+  // ---------- background beat: an original lo-fi loop made in the browser, ducks when the DJ talks ----------
+  const beat = (() => {
+    let ctx = null, master = null, timer = null, next = 0, step = 0, on = store.get("dr_beat") !== "off";
+    const BPM = 88, STEP = 60 / BPM / 4;
+    const CHORDS = [[57, 60, 64], [53, 57, 60], [48, 52, 55], [55, 59, 62]]; // Am F C G
+    const hz = (m) => 440 * Math.pow(2, (m - 69) / 12);
+    let noise = null;
+    function voice(t, f, dur, type, gain, cutoff) {
+      const o = ctx.createOscillator(), g = ctx.createGain(), lp = ctx.createBiquadFilter();
+      o.type = type; o.frequency.value = f; lp.type = "lowpass"; lp.frequency.value = cutoff;
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(gain, t + 0.04); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(lp).connect(g).connect(master); o.start(t); o.stop(t + dur + 0.05);
+    }
+    function kick(t) {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.18);
+      g.gain.setValueAtTime(0.9, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      o.connect(g).connect(master); o.start(t); o.stop(t + 0.32);
+    }
+    function hat(t, v) {
+      const src = ctx.createBufferSource(), hp = ctx.createBiquadFilter(), g = ctx.createGain();
+      src.buffer = noise; hp.type = "highpass"; hp.frequency.value = 7000;
+      g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+      src.connect(hp).connect(g).connect(master); src.start(t); src.stop(t + 0.06);
+    }
+    function schedule() {
+      while (next < ctx.currentTime + 1.5) {
+        const s16 = step % 16, bar = Math.floor(step / 16) % 4;
+        if (s16 === 0 || s16 === 10) kick(next);
+        if (s16 % 2 === 0) hat(next, s16 % 4 === 2 ? 0.12 : 0.05);
+        if (s16 === 4 || s16 === 12) hat(next, 0.2);
+        if (s16 === 0) for (const m of CHORDS[bar]) voice(next, hz(m), STEP * 15, "sawtooth", 0.05, 900);
+        if (s16 === 0 || s16 === 8) voice(next, hz(CHORDS[bar][0] - 24), STEP * 7, "triangle", 0.35, 400);
+        next += STEP; step++;
+      }
+    }
+    function start() {
+      if (!on) return;
+      try {
+        ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+        if (!noise) { noise = ctx.createBuffer(1, ctx.sampleRate * 0.1, ctx.sampleRate); const d = noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+        if (!master) { master = ctx.createGain(); master.gain.value = 0.16; master.connect(ctx.destination); }
+        ctx.resume(); next = ctx.currentTime + 0.1;
+        clearInterval(timer); timer = setInterval(schedule, 200); schedule();
+      } catch { /* no Web Audio: no beat */ }
+    }
+    function stop() { clearInterval(timer); timer = null; if (ctx) ctx.suspend(); }
+    function duck(talking) { if (master) master.gain.setTargetAtTime(talking ? 0.05 : 0.16, ctx.currentTime, 0.25); }
+    function toggle() { on = !on; store.set("dr_beat", on ? "on" : "off"); if (on && listening) start(); else stop(); return on; }
+    return { start, stop, duck, toggle, get on() { return on; } };
+  })();
+
+  // ---------- speaking: the AI DJ improvises each line (MP3 from the server); browser voice as fallback ----------
   const audio = new Audio();
   audio.preload = "auto";
   const SILENT = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
   let playing = false, current = null;
+  const clips = new Map(); // line id → Promise<{ url, transcript } | null>
+
+  function getClip(seg) {
+    if (!clips.has(seg.id)) {
+      clips.set(seg.id, fetch("/api/voice?id=" + seg.id).then(async (r) => {
+        if (!r.ok) return null;
+        const t = r.headers.get("x-transcript");
+        return { url: URL.createObjectURL(await r.blob()), transcript: t ? decodeURIComponent(t) : null };
+      }).catch(() => null));
+      if (clips.size > 40) clips.delete(clips.keys().next().value);
+    }
+    return clips.get(seg.id);
+  }
 
   function finish() {
     playing = false; current = null;
     $("booth").classList.remove("speaking");
-    setTimeout(speakNext, 250);
+    beat.duck(false);
+    setTimeout(speakNext, 600);
   }
   audio.onended = finish;
-  audio.onerror = () => {
-    if (!listening) return;
-    if (current && audio.src.includes("/api/voice")) browserSpeak(current); else finish();
-  };
+  audio.onerror = () => { if (listening && current && audio.src.startsWith("blob:")) browserSpeak(current); };
 
   function browserSpeak(seg) {
     if (!tts) return finish();
@@ -192,21 +256,25 @@ body.stream .booth { padding: 4vw; }
     const v = voices().find((x) => x.name === $("voice").value);
     if (v) u.voice = v;
     u.rate = 1.1; u.pitch = 0.95;
-    u.onstart = () => $("booth").classList.add("speaking");
+    u.onstart = () => { $("booth").classList.add("speaking"); beat.duck(true); };
     u.onend = u.onerror = finish;
     tts.speak(u);
   }
 
-  function speakNext() {
+  async function speakNext() {
     if (!listening || playing || !queue.length) return;
     if (!aiVoice && (!tts || tts.speaking)) return;
     const seg = queue.shift();
     current = seg; playing = true;
+    if (!aiVoice) { showCaption(seg); return browserSpeak(seg); }
+    if (queue[0]) getClip(queue[0]); // get the next one ready
+    const clip = await getClip(seg);
+    if (!listening || current !== seg) return;
+    if (!clip) { showCaption(seg); return browserSpeak(seg); }
+    if (clip.transcript) { seg.text = clip.transcript; renderLog(); }
     showCaption(seg);
-    if (!aiVoice) return browserSpeak(seg);
-    audio.src = "/api/voice?id=" + seg.id;
-    audio.play().then(() => $("booth").classList.add("speaking")).catch(() => browserSpeak(seg));
-    if (queue[0]) fetch("/api/voice?id=" + queue[0].id).catch(() => {}); // get the next line ready
+    audio.src = clip.url;
+    audio.play().then(() => { $("booth").classList.add("speaking"); beat.duck(true); }).catch(() => browserSpeak(seg));
   }
 
   function setListening(on) {
@@ -217,17 +285,21 @@ body.stream .booth { padding: 4vw; }
     if (!on) {
       if (tts) tts.cancel();
       audio.pause();
+      beat.stop();
       queue.length = 0; playing = false; current = null;
       $("booth").classList.remove("speaking");
     }
     if (on) {
       if (!aiVoice && !tts) { $("hint").textContent = "This browser can't speak. Captions only."; return; }
+      audio.src = SILENT; audio.play().catch(() => {}); // unlock audio on phones (needs the tap)
+      beat.start();
       const latest = lines[lines.length - 1];
       if (latest) queue.push(latest);
-      else if (aiVoice) { audio.src = SILENT; audio.play().catch(() => {}); } // unlock audio on phones
       speakNext();
     }
   }
+  $("beat").textContent = beat.on ? "🎵 Beat on" : "🎵 Beat off";
+  $("beat").onclick = () => { $("beat").textContent = beat.toggle() ? "🎵 Beat on" : "🎵 Beat off"; };
   $("listen").onclick = () => setListening(!listening);
   if (stream) { $("overlay").hidden = false; $("goLive").onclick = () => { $("overlay").hidden = true; setListening(true); }; }
 
